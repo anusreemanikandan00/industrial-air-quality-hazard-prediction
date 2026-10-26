@@ -1,5 +1,5 @@
 
-import streamlit as st
+import gradio as gr
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -9,59 +9,66 @@ import joblib
 model = tf.keras.models.load_model(
     "saved_model/air_quality_ann.keras"
 )
+
 scaler = joblib.load("saved_model/scaler.pkl")
 label_encoder = joblib.load("saved_model/label_encoder.pkl")
 features = joblib.load("saved_model/features.pkl")
 
-# Page configuration
-st.set_page_config(
-    page_title="Air Quality Hazard Prediction",
-    page_icon="🌫️",
-    layout="wide"
-)
 
-# Dashboard heading
-st.title("🌫️ Industrial Air Quality Hazard Prediction")
-st.write(
-    "An ANN-based prototype for classifying air-quality readings."
-)
+def predict_air_quality(*values):
+    try:
+        # Prepare input
+        input_data = pd.DataFrame(
+            [values], columns=features
+        )
 
-st.info(
-    "Prototype only: predictions are based on experimental "
-    "CO-based categories, not certified industrial safety limits."
-)
+        # Scale input
+        scaled_data = scaler.transform(input_data)
 
-st.subheader("Enter Sensor Readings")
+        # Predict using ANN
+        probabilities = model.predict(
+            scaled_data, verbose=0
+        )[0]
 
-# Input fields
-input_values = {}
+        predicted_index = np.argmax(probabilities)
+        predicted_label = label_encoder.inverse_transform(
+            [predicted_index]
+        )[0]
 
-for feature in features:
-    input_values[feature] = st.number_input(
-        feature,
-        value=0.0,
-        format="%.3f"
+        results = {
+            str(label): float(probability)
+            for label, probability in zip(
+                label_encoder.classes_, probabilities
+            )
+        }
+
+        return predicted_label, results
+
+    except Exception as error:
+        return f"Prediction error: {error}", {}
+
+
+# Create input fields
+inputs = [
+    gr.Number(label=str(feature), value=0)
+    for feature in features
+]
+
+demo = gr.Interface(
+    fn=predict_air_quality,
+    inputs=inputs,
+    outputs=[
+        gr.Textbox(label="Predicted Pollution Level"),
+        gr.Label(label="Prediction Probabilities")
+    ],
+    title="Industrial Air Quality Hazard Prediction",
+    description=(
+        "Enter air-quality sensor readings to estimate "
+        "the pollution category using a trained ANN model. "
+        "This is an experimental prototype, not a certified "
+        "industrial safety system."
     )
+)
 
-# Prediction button
-if st.button("Predict Pollution Level"):
-    input_df = pd.DataFrame([input_values], columns=features)
-
-    scaled_input = scaler.transform(input_df)
-    probabilities = model.predict(scaled_input, verbose=0)
-
-    predicted_index = int(np.argmax(probabilities, axis=1)[0])
-    predicted_label = label_encoder.inverse_transform(
-        [predicted_index]
-    )[0]
-
-    st.subheader("Prediction Result")
-    st.success(f"Predicted Category: {predicted_label}")
-
-    st.write("Model output probabilities:")
-    probability_df = pd.DataFrame({
-        "Category": label_encoder.classes_,
-        "Probability (%)": probabilities[0] * 100
-    })
-
-    st.dataframe(probability_df, hide_index=True)
+if __name__ == "__main__":
+    demo.launch()
